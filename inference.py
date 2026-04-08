@@ -2,36 +2,33 @@
 inference.py
 ============
 Inference script for AdPlatform RL environment.
-Configured for auction task by default.
+Runs all three tasks sequentially with continuous stdout output.
 
 MANDATORY ENVIRONMENT VARIABLES:
     API_BASE_URL      : LLM API endpoint
     MODEL_NAME        : model identifier
     HF_TOKEN          : Hugging Face / API key
     IMAGE_NAME        : docker image name (if using from_docker_image)
-    TASK_NAME         : budget | auction | dynamic_campaign (default: auction)
     YAML_PATH         : path to Ads export YAML (optional)
 
-STDOUT FORMAT:
+STDOUT FORMAT (per task, continuous):
     [START] task=<task> env=<benchmark> model=<model>
     [STEP]  step=<n> action=<action> reward=<0.00> done=<true|false> error=<msg|null>
     [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...>
 
-Score: mean normalized reward per step → sum(rewards) / MAX_STEPS
-       Each step reward is already in [0, 1] from reward system.
-       Final score is therefore in [0, 1].
+Score: mean normalized reward per step -> sum(rewards) / MAX_STEPS
 """
 
 import asyncio
 import json
 import os
 import textwrap
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from openai import OpenAI
 
 from server.environment import AdPlatformEnvironment
-from models import AdPlatformAction, CampaignProfile
+from models import AdPlatformAction
 from client import AdPlatformClient
 
 # ---------------- CONFIG ----------------
@@ -39,43 +36,74 @@ IMAGE_NAME   = os.getenv("IMAGE_NAME")
 API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
-TASK_NAME    = os.getenv("TASK",    "auction")
 YAML_PATH    = os.getenv("YAML_PATH",    None)
 BENCHMARK    = os.getenv("BENCHMARK",    "ad_platform_env")
+
+# All three tasks run sequentially
+ALL_TASKS = ["budget", "auction", "dynamic_campaign"]
 
 MAX_STEPS               = 30
 TEMPERATURE             = 0.7
 MAX_TOKENS              = 256
-SUCCESS_SCORE_THRESHOLD = 0.5   # normalized score in [0, 1]
+SUCCESS_SCORE_THRESHOLD = 0.5
 
-# ---------------- SYSTEM PROMPT ----------------
-SYSTEM_PROMPT = textwrap.dedent(
-    """
-    You are an autonomous bidding agent controlling an ad platform environment.
-    Your goal is to maximize conversions by allocating budget and setting bids
-    across 3 campaigns over 30 steps.
 
-    Respond with a valid JSON object only — no commentary, no markdown, no extra text.
+# ---------------- SYSTEM PROMPTS ----------------
+SYSTEM_PROMPTS = {
+    "budget": textwrap.dedent("""
+        You are an autonomous budget allocation agent controlling an ad platform.
+        Your goal is to maximize conversions by allocating budget across 3 campaigns over 30 steps.
+        No bidding required.
 
-    Action format:
-      {"allocations": [<float>, <float>, <float>], "bids": [<float>, <float>, <float>]}
+        Respond with a valid JSON object only — no commentary, no markdown, no extra text.
 
-    Guidelines:
-    - CRITICAL: You have exactly 30 steps. Pace your budget evenly — spend 
-                roughly 1/30 of remaining budget per step. Never spend more than 10% 
-                of total budget in a single step. Spending all budget early leaves 
-                nothing for the remaining steps and destroys your score.
+        Action format:
+          {"allocations": [<float>, <float>, <float>], "bids": [0.0, 0.0, 0.0]}
 
-    - allocations : budget to spend per campaign this step (non-negative floats)
-    - bids        : bid price per campaign — bid above competitor bids to win auctions
+        Guidelines:
+        - CRITICAL: Pace your budget evenly — spend roughly 1/30 of remaining budget per step.
+        - Concentrate spend on campaigns with higher conversion rates.
+        - Never spend more than 10% of total budget in a single step.
+        - Use the full budget across all 30 steps for best score.
+    """).strip(),
 
-    - KEY STRATEGIES
-    - Concentrate spend and high bids on campaigns with higher conversion rates
-    - If you won fewer auctions last step, raise bids on high-converting campaigns
-    - If your previous episode score was low, adjust your overall strategy this episode
-    - Pace your budget — avoid dumping it all early, save some for later steps
-    """
-).strip()
+    "auction": textwrap.dedent("""
+        You are an autonomous bidding agent controlling an ad platform.
+        Your goal is to maximize conversions by allocating budget and setting bids
+        across 3 campaigns over 30 steps.
+
+        Respond with a valid JSON object only — no commentary, no markdown, no extra text.
+
+        Action format:
+          {"allocations": [<float>, <float>, <float>], "bids": [<float>, <float>, <float>]}
+
+        Guidelines:
+        - CRITICAL: Pace your budget evenly — spend roughly 1/30 of remaining budget per step.
+        - Never spend more than 10% of total budget in a single step.
+        - Bid above competitor bids to win auctions — check competitor bids each step.
+        - Concentrate spend and high bids on campaigns with higher conversion rates.
+        - If your previous episode score was low, adjust your overall strategy.
+    """).strip(),
+
+    "dynamic_campaign": textwrap.dedent("""
+        You are an autonomous bidding agent controlling an ad platform with dynamic campaigns.
+        Your goal is to maximize conversions across 3 campaigns over 30 steps.
+        Campaigns have seasonality, market events, and adaptive competitors.
+
+        Respond with a valid JSON object only — no commentary, no markdown, no extra text.
+
+        Action format:
+          {"allocations": [<float>, <float>, <float>], "bids": [<float>, <float>, <float>]}
+
+        Guidelines:
+        - CRITICAL: Pace your budget evenly — spend roughly 1/30 of remaining budget per step.
+        - Never spend more than 10% of total budget in a single step.
+        - Watch campaign conversion rates closely — they change each step due to market events.
+        - When a campaign conversion rate spikes above normal, increase spend and bids on it.
+        - Bid above competitor bids to win auctions — competitors adapt to your bids.
+        - Concentrate spend on the highest converting campaign each step.
+    """).strip(),
+}
 
 
 # ---------------- LOGGING ----------------
@@ -90,7 +118,6 @@ def log_step(
     done:      bool,
     error:     Optional[str],
     breakdown: Optional[dict] = None,
-    competitor_bids: Optional[list] = None,
 ) -> None:
     breakdown_str = ""
     if breakdown:
@@ -105,8 +132,6 @@ def log_step(
         f"done={str(done).lower()} error={error or 'null'}{breakdown_str}",
         flush=True,
     )
-    if competitor_bids:
-        print(f" competitor_bids={competitor_bids}", flush=True)
 
 
 def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
@@ -119,24 +144,19 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 
 # ---------------- PROMPT ----------------
 def build_user_prompt(
-    step:         int,
-    obs:          dict,
-    last_reward:  float,
+    step:        int,
+    obs:         dict,
+    last_reward: float,
+    task:        str,
 ) -> str:
-    """
-    Build the user prompt for the model.
-    Uses obs_history from observation for structured step context.
-    Includes prev episode grader scores for episodic policy conditioning.
-    """
-    # --- Current state ---
     total_budget     = obs.get("total_budget", 1000.0)
     remaining_budget = obs.get("remaining_budget", 0.0)
     budget_spent     = total_budget - remaining_budget
     budget_pct_used  = (budget_spent / (total_budget + 1e-8)) * 100
-    campaign_perf     = obs.get("campaign_performance", [])
-    competitor_bids   = obs.get("competitor_bids", [])
+    suggested_spend  = remaining_budget / max(MAX_STEPS - step + 1, 1)
+    campaign_perf    = obs.get("campaign_performance", [])
+    competitor_bids  = obs.get("competitor_bids", [])
 
-    # --- Obs history window (last history_window steps from environment) ---
     obs_history = obs.get("obs_history", [])
     if obs_history:
         history_lines = []
@@ -153,7 +173,6 @@ def build_user_prompt(
     else:
         history_block = "None"
 
-    # --- Previous episode grader scores ---
     prev_graded = obs.get("prev_episode_graded", False)
     if prev_graded:
         prev_block = textwrap.dedent(
@@ -168,15 +187,20 @@ def build_user_prompt(
     else:
         prev_block = "Previous episode: none (first episode)"
 
+    # Competitor bids only relevant for bidding tasks
+    competitor_line = ""
+    if task in ("auction", "dynamic_campaign") and competitor_bids:
+        competitor_line = f"Competitor bids    : {competitor_bids}\n        "
+
     return textwrap.dedent(
         f"""
-        Step: {step} / 30
+        Step: {step} / {MAX_STEPS}
         Total budget       : {total_budget:.2f}
         Remaining budget   : {remaining_budget:.2f}
         Budget spent       : {budget_spent:.2f} ({budget_pct_used:.1f}% used)
+        Suggested spend    : {suggested_spend:.2f} (target this step)
         Campaign conv rates: {campaign_perf}
-        Competitor bids    : {competitor_bids}
-        Last step reward   : {last_reward:.4f}
+        {competitor_line}Last step reward   : {last_reward:.4f}
 
         Recent step history:
         {history_block}
@@ -194,14 +218,15 @@ def get_model_action(
     step:        int,
     obs:         dict,
     last_reward: float,
+    task:        str,
 ) -> dict:
-    prompt = build_user_prompt(step, obs, last_reward)
+    prompt = build_user_prompt(step, obs, last_reward, task)
+    system_prompt = SYSTEM_PROMPTS.get(task, SYSTEM_PROMPTS["auction"])
     try:
-        # print(f"[DEBUG] Prompt:\n{prompt}", flush=True)
         completion = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": prompt},
             ],
             temperature=TEMPERATURE,
@@ -209,7 +234,6 @@ def get_model_action(
             stream=False,
         )
         text = (completion.choices[0].message.content or "").strip()
-        # print(f"[DEBUG] Model raw response: {text}", flush=True)
         try:
             action = json.loads(text)
             if not isinstance(action, dict):
@@ -222,92 +246,91 @@ def get_model_action(
         return {}
 
 
-# ---------------- MAIN LOOP ----------------
-async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-
-    # Instantiate environment
-    if IMAGE_NAME:
-        env = await AdPlatformClient.from_docker_image(
-            IMAGE_NAME,
-            env_vars={"TASK": TASK_NAME}
-        )
-    else:
-        env = AdPlatformEnvironment(task=TASK_NAME, yaml_path=YAML_PATH)
-
+# ---------------- EPISODE RUNNER ----------------
+async def run_episode(
+    client: OpenAI,
+    env:    any,
+    task:   str,
+) -> Tuple[bool, int, float, List[float]]:
+    """
+    Run one complete episode for a given task.
+    Emits [START], [STEP] x MAX_STEPS, [END] to stdout.
+    Returns (success, steps_taken, score, rewards).
+    """
     rewards:     List[float] = []
     steps_taken: int         = 0
     score:       float       = 0.0
     success:     bool        = False
 
-    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
+    log_start(task=task, env=BENCHMARK, model=MODEL_NAME)
 
     try:
         # --- Reset ---
-        result = env.reset()
-        if asyncio.iscoroutine(result):
-            result = await result
+        if IMAGE_NAME:
+            result = await env.reset()
+        else:
+            result = env.reset(task=task)
+            if asyncio.iscoroutine(result):
+                result = await result
+
         last_reward = 0.0
-        # Extract observation from StepResult wrapper
         obs_obj = getattr(result, "observation", result)
         obs = obs_obj.model_dump() if hasattr(obs_obj, "model_dump") else {}
-        # obs = result.model_dump() if hasattr(result, "model_dump") else {}
 
-
-        consecutive_failures = 0
+        consecutive_failures    = 0
         MAX_CONSECUTIVE_FAILURES = 10
+
         for step in range(1, MAX_STEPS + 1):
             if getattr(result, "done", False):
                 break
 
             # --- Get model action ---
-            action_dict = get_model_action(client, step, obs, last_reward)
+            action_dict = get_model_action(client, step, obs, last_reward, task)
 
-            # --- Early termination if model fails too many times ---
             if not action_dict:
                 consecutive_failures += 1
                 if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-                    print(f"[DEBUG] {consecutive_failures} consecutive model failures — terminating early", flush=True)
+                    print(
+                        f"[DEBUG] {consecutive_failures} consecutive failures — terminating early",
+                        flush=True,
+                    )
                     break
             else:
                 consecutive_failures = 0
 
-            # --- Defaults for missing fields ---
+            # --- Defaults ---
             if "allocations" not in action_dict:
                 action_dict["allocations"] = [0.0, 0.0, 0.0]
             if "bids" not in action_dict:
-                # Must be length 3 for auction/dynamic_campaign
-                # Zero bids lose all auctions but prevent assertion failure
                 action_dict["bids"] = [0.0, 0.0, 0.0]
 
-            # --- Validate and create action ---
+            # --- Validate action ---
             try:
                 action_obj = AdPlatformAction(**action_dict)
             except Exception as exc:
                 print(f"[DEBUG] Invalid action, using zeros: {exc}", flush=True)
                 action_obj = AdPlatformAction(
                     allocations=[0.0, 0.0, 0.0],
-                    bids=[0.0, 0.0, 0.0]
+                    bids=[0.0, 0.0, 0.0],
                 )
 
             # --- Step ---
-            result = env.step(action_obj)
-            if asyncio.iscoroutine(result):
-                result = await result
-            reward = getattr(result, "reward", 0.0) or 0.0
-            done   = getattr(result, "done",   False)
-            # Extract observation from StepResult wrapper
-            obs_obj = getattr(result, "observation", result)
-            obs = obs_obj.model_dump() if hasattr(obs_obj, "model_dump") else {}
-            # obs    = result.model_dump() if hasattr(result, "model_dump") else {}
+            if IMAGE_NAME:
+                result = await env.step(action_obj)
+            else:
+                result = env.step(action_obj)
+                if asyncio.iscoroutine(result):
+                    result = await result
 
-            # --- Extract reward breakdown for diagnostics ---
+            reward  = getattr(result, "reward", 0.0) or 0.0
+            done    = getattr(result, "done",   False)
+            obs_obj = getattr(result, "observation", result)
+            obs     = obs_obj.model_dump() if hasattr(obs_obj, "model_dump") else {}
             breakdown = obs.get("reward_breakdown")
 
-            steps_taken  = step
-            last_reward  = reward
+            steps_taken = step
+            last_reward = reward
             rewards.append(reward)
-            competitor_bids=getattr(obs_obj, "competitor_bids", None)
 
             log_step(
                 step      = step,
@@ -316,26 +339,48 @@ async def main() -> None:
                 done      = done,
                 error     = None,
                 breakdown = breakdown,
-                competitor_bids = competitor_bids
             )
 
             if done:
                 break
 
-        # --- Score: mean normalized reward per step → [0, 1] ---
+        # --- Score ---
         score   = sum(rewards) / MAX_STEPS if MAX_STEPS > 0 else 0.0
         score   = float(max(0.0, min(1.0, score)))
         success = score >= SUCCESS_SCORE_THRESHOLD
 
     finally:
-        try:
-            if hasattr(env, "close"):
-                close_result = env.close()
-                if asyncio.iscoroutine(close_result):
-                    await close_result
-        except Exception as e:
-            print(f"[DEBUG] env.close() error: {e}", flush=True)
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+
+    return success, steps_taken, score, rewards
+
+
+# ---------------- MAIN ----------------
+async def main() -> None:
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+
+    for task in ALL_TASKS:
+        if IMAGE_NAME:
+            # Fresh container per task with correct TASK env var
+            # Container lifecycle is silent — no output between tasks
+            env = await AdPlatformClient.from_docker_image(
+                IMAGE_NAME,
+                env_vars={"TASK": task},
+            )
+            try:
+                await run_episode(client, env, task)
+            finally:
+                try:
+                    await env.close()
+                except Exception:
+                    pass   # silent cleanup
+        else:
+            # Local — fresh env per task
+            env = AdPlatformEnvironment(task=task, yaml_path=YAML_PATH)
+            try:
+                await run_episode(client, env, task)
+            except Exception as e:
+                print(f"[DEBUG] Episode error for task={task}: {e}", flush=True)
 
 
 if __name__ == "__main__":
