@@ -42,7 +42,7 @@ MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 TASK_NAME    = os.getenv("TASK",    "auction")
 YAML_PATH    = os.getenv("YAML_PATH",    None)
 BENCHMARK    = os.getenv("BENCHMARK",    "ad_platform_env")
-print(API_KEY, "yoooo")
+
 MAX_STEPS               = 30
 TEMPERATURE             = 0.7
 MAX_TOKENS              = 256
