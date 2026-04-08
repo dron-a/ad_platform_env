@@ -2,7 +2,7 @@
 import os
 import argparse
 import uvicorn
-from server.grader import compute_score, compute_auction_score, compute_multi_campaign_score
+from server.grader import compute_score, compute_auction_score, compute_dynamics_campaign_score
 
 try:
     from openenv.core.env_server.http_server import create_app
@@ -71,7 +71,7 @@ def grade_auction():
 @app.get("/grade/dynamic_campaign")
 def grade_dynamic_campaign():
     env = get_ad_platform_env("default")
-    grader_result = compute_multi_campaign_score(env._state)
+    grader_result = compute_dynamics_campaign_score(env._state)
     score = float(max(0.01, min(0.99, grader_result["final_score"])))
     return {"score": score, "reward": score}
 
