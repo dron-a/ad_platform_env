@@ -264,6 +264,9 @@ class AdPlatformState(State):
     cumulative_bid_quality: float = Field(default=0.0)
     cumulative_pacing_score: float = Field(default=0.0)
 
+    # -----------------last step reward ----------------------------
+    last_step_reward: float = Field(default=0.0)
+
 
 
 

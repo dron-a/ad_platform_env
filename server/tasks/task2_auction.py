@@ -194,6 +194,7 @@ def step(state: AdPlatformState, action: AdPlatformAction) -> AdPlatformObservat
         max_possible_conv = max_possible,
     )
     reward = reward_breakdown["step_reward"]
+    s.last_step_reward = reward
 
     # --- Build observation ---
     # Grader fields default to None mid-episode so the agent knows they are

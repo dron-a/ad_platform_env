@@ -2,6 +2,7 @@
 import os
 import argparse
 import uvicorn
+from server.grader import compute_score, compute_auction_score, compute_multi_campaign_score
 
 try:
     from openenv.core.env_server.http_server import create_app
@@ -51,6 +52,28 @@ app = create_app(
     AdPlatformObservation,
     env_name="ad_platform_env"
 )
+
+# --- Grade endpoints ---
+@app.get("/grade/budget")
+def grade_budget():
+    env = get_ad_platform_env("default")
+    grader_result = compute_score(env._state)
+    score = float(max(0.01, min(0.99, grader_result["final_score"])))
+    return {"score": score, "reward": score}
+
+@app.get("/grade/auction")
+def grade_auction():
+    env = get_ad_platform_env("default")
+    grader_result = compute_auction_score(env._state)
+    score = float(max(0.01, min(0.99, grader_result["final_score"])))
+    return {"score": score, "reward": score}
+
+@app.get("/grade/dynamic_campaign")
+def grade_dynamic_campaign():
+    env = get_ad_platform_env("default")
+    grader_result = compute_multi_campaign_score(env._state)
+    score = float(max(0.01, min(0.99, grader_result["final_score"])))
+    return {"score": score, "reward": score}
 
 def main(host: str = "0.0.0.0", port: int = 8000):
     """
