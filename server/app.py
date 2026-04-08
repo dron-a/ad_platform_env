@@ -67,7 +67,7 @@ def main(host: str = "0.0.0.0", port: int = 8000):
 
     For production deployments, consider using uvicorn directly with
     multiple workers:
-        uvicorn ad_platform_env.server.app:app --workers 4
+        uvicorn ad_platform_env.server.app:app --yaml-path /path/to/your/yaml.yaml --host 0.0.0.0 --port 8000
     """
 
     parser = argparse.ArgumentParser(description="Kube SRE Gym server")
