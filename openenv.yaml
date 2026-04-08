@@ -1,0 +1,55 @@
+name: ad_platform_env
+version: "0.1.0"
+description: "Multi-task ad platform RL environment for budget optimization, auction bidding, and dynamic-campaign management"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  entry: "server.app:app"
+
+tasks:
+  - name: budget
+    description: "Allocate a fixed budget across ad campaigns over 30 steps to maximize conversions. No bidding required."
+    difficulty: easy
+
+  - name: auction
+    description: "Bid competitively against adaptive competitors while managing a budget across 3 campaigns."
+    difficulty: medium
+
+  - name: dynamic_campaign
+    description: "Manage budget and bids across campaigns with seasonality, market events, and adaptive competitors."
+    difficulty: hard
+
+action:
+  type: object
+  fields:
+    allocations:
+      type: array
+      items: float
+      description: "Budget allocation per campaign"
+    bids:
+      type: array
+      items: float
+      description: "Bid per campaign (required for auction/dynamic_campaign)"
+
+observation:
+  type: object
+  fields:
+    step:
+      type: integer
+      description: "Current timestep"
+    remaining_budget:
+      type: float
+      description: "Remaining budget for the episode"
+    campaign_performance:
+      type: array
+      items: float
+      description: "Conversion rate per campaign"
+    competitor_bids:
+      type: array
+      items: float
+      description: "Current competitor bids per campaign"
+    reward:
+      type: float
+    done:
+      type: boolean
