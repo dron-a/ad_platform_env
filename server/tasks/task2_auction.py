@@ -31,6 +31,7 @@ def reset(state: AdPlatformState, profile: dict | None = None):
 
     # --- Apply campaign profile (overrides defaults with real data) and wipe episode state ---
     s.apply_profile(profile)
+    s.reward_bounds = compute_reward_bounds(s)
     s.step_count               = 0
     s.remaining_budget         = s.total_budget        # fixed original typo
     s.total_conversions        = 0.0
@@ -192,6 +193,7 @@ def step(state: AdPlatformState, action: AdPlatformAction) -> AdPlatformObservat
         cumulative_bid    = s.cumulative_bid_quality,
         cumulative_conv   = s.total_conversions,
         max_possible_conv = max_possible,
+        bounds            = s.reward_bounds,
     )
     reward = reward_breakdown["step_reward"]
     s.last_step_reward = reward

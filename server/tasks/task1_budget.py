@@ -25,6 +25,7 @@ def reset(state: AdPlatformState, realism_mode: str | None = None, profile: dict
 
     # --- Apply historical campaign profile first (overrides defaults with real data) ---
     s.apply_profile(profile)
+    s.reward_bounds = compute_reward_bounds(s)
     if realism_mode is not None:
         s.realism_mode = realism_mode
 
@@ -161,6 +162,7 @@ def step(state: AdPlatformState, action: AdPlatformAction):
         cumulative_smooth = s.cumulative_pacing_score,
         cumulative_conv   = s.total_conversions,
         max_possible_conv = max_possible,
+        bounds            = s.reward_bounds,
     )
     reward = reward_breakdown["step_reward"]
     s.last_step_reward = reward

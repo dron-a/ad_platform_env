@@ -8,28 +8,97 @@ task-specific reward modules.
     reward_task2_auction.py  — imports this
     reward_task3_multi.py    — imports this
 
-Nothing in this file is task-specific. All task-specific signal computation
-lives in the respective task module.
+Nothing in this file is task-specific.
+
+Static vs dynamic bounds
+-------------------------
+CampaignProfile can only override:
+    conversion_rates, competitor_bids, bid_volatility,
+    seasonal_multipliers, market_events, total_budget
+
+Everything else — penalty_alpha, penalty_beta, max_fraction_per_step,
+seasonal_amplitude — are fixed state fields NOT overridable via profile.
+
+Therefore:
+
+  DYNAMIC (use compute_reward_bounds after apply_profile):
+    MAX_CONV_PER_STEP   — depends on total_budget, conversion_rates,
+                          seasonal_multipliers (all profile-overridable)
+    MAX_ILLEGAL_PENALTY — depends on n_campaigns which can change if
+                          profile provides a different conversion_rates list
+
+  STATIC (always fixed — profile cannot change these):
+    MAX_SPEND_PENALTY     = 0.09   penalty_alpha=1.0, beta=2.0, frac=0.30
+    MAX_CARRYOVER_PENALTY = 0.20   formula coefficient
 """
 
 from __future__ import annotations
 import numpy as np
 
 # ---------------------------------------------------------------------------
-# Theoretical bounds
-# Derived from AdPlatformState defaults
+# Static constants — profile cannot change these
 # ---------------------------------------------------------------------------
 
-MAX_CONV_PER_STEP: float = 300.0 * 0.05 * 1.10   # ≈ 16.5
-MAX_SPEND_PENALTY: float = 0.09    # penalty_alpha=1.0, beta=2.0, frac=0.30
-MAX_CARRYOVER_PENALTY: float = 0.20  # 0.2 * 1.0^2 * (1-0) at step 0
-MAX_ILLEGAL_PENALTY: float = 1.50   # 3 campaigns * 0.5 per negative alloc
+MAX_SPEND_PENALTY:     float = 0.09   # penalty_alpha=1.0 * (0.30 ** 2.0)
+MAX_CARRYOVER_PENALTY: float = 0.20   # 0.2 * 1.0^2 * (1 - 0) at step 0
+
+# ---------------------------------------------------------------------------
+# Default dynamic bounds — from AdPlatformState defaults
+# Kept as module-level names for backward compatibility and fallback
+# ---------------------------------------------------------------------------
+
+MAX_CONV_PER_STEP:   float = 300.0 * 0.05 * 1.10   # 16.5
+MAX_ILLEGAL_PENALTY: float = 1.50                   # 3 campaigns * 0.5
 
 # ---------------------------------------------------------------------------
 # Shared penalty weights — identical across all tasks
 # ---------------------------------------------------------------------------
+
 W_CARRYOVER: float = 0.07
 W_SPEND:     float = 0.03
+
+# ---------------------------------------------------------------------------
+# Dynamic reward bounds
+# ---------------------------------------------------------------------------
+
+def compute_reward_bounds(state) -> dict:
+    """
+    Compute the two normalization ceilings that depend on CampaignProfile.
+
+    Called once per episode in each task's reset() after apply_profile().
+    Store result in s.reward_bounds and pass to reward functions each step.
+
+    Only two bounds are returned — MAX_SPEND_PENALTY and
+    MAX_CARRYOVER_PENALTY are always fixed and not included here.
+    Use module-level constants for those directly.
+
+    Parameters
+    ----------
+    state : AdPlatformState after apply_profile() has run
+
+    Returns
+    -------
+    dict:
+        MAX_CONV_PER_STEP   : dynamic — total_budget * best_cr * max_seasonal
+        MAX_ILLEGAL_PENALTY : dynamic — n_campaigns * 0.5
+    """
+    # total_budget, conversion_rates, seasonal_multipliers — all profile-overridable
+    max_spend_per_step = state.max_fraction_per_step * state.total_budget
+    best_cr = max(state.base_conversion_rates, default=0.05)
+
+    if state.seasonal_multipliers:
+        max_seasonal = max(state.seasonal_multipliers)
+    else:
+        max_seasonal = 1.0 + state.seasonal_amplitude
+
+    # n_campaigns can change if profile provides different conversion_rates
+    n_campaigns = len(state.base_conversion_rates)
+
+    return {
+        "MAX_CONV_PER_STEP":   float(max(max_spend_per_step * best_cr * max_seasonal, 1e-8)),
+        "MAX_ILLEGAL_PENALTY": float(max(n_campaigns * 0.5, 1e-8)),
+    }
+
 
 # ---------------------------------------------------------------------------
 # Helper: clamp-normalize value to [0, 1] against a known ceiling
@@ -43,47 +112,61 @@ def norm(value: float, ceiling: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Illegal gate
-# Multiplicative — suppresses entire positive reward when illegal actions
-# occur. Cannot be compensated by good performance elsewhere.
+# Illegal gate — uses dynamic MAX_ILLEGAL_PENALTY from bounds
 # ---------------------------------------------------------------------------
 
-def compute_illegal_gate(illegal_penalty: float) -> float:
+def compute_illegal_gate(
+    illegal_penalty: float,
+    bounds:          dict | None = None,
+) -> float:
     """
     Returns a gate in [0, 1].
     0.0 when illegal_penalty is at maximum — fully suppresses positive reward.
     1.0 when no illegal actions — positive reward passes through unchanged.
+
+    Parameters
+    ----------
+    illegal_penalty : float
+    bounds          : from compute_reward_bounds(); uses default if None
     """
-    illegal_n = norm(illegal_penalty, MAX_ILLEGAL_PENALTY)
-    return float(1.0 - illegal_n)
+    ceiling = bounds.get("MAX_ILLEGAL_PENALTY", MAX_ILLEGAL_PENALTY) if bounds else MAX_ILLEGAL_PENALTY
+    return float(1.0 - norm(illegal_penalty, ceiling))
 
 
 # ---------------------------------------------------------------------------
-# Soft penalties — additive, shared across all tasks
+# Soft penalties — always use static constants
+# penalty_alpha, penalty_beta, max_fraction_per_step not profile-overridable
 # ---------------------------------------------------------------------------
 
 def compute_soft_penalties(
-    spend_penalty:          float,
+    spend_penalty:     float,
     carryover_penalty: float,
 ) -> tuple[float, float, float]:
     """
-    Normalize spend and carryover penalties.
+    Normalize spend and carryover penalties against fixed ceilings.
     Returns (spend_n, carryover_n, total_soft_penalty_contribution).
     total = W_SPEND * spend_n + W_CARRYOVER * carryover_n
     """
-    spend_n = norm(spend_penalty, MAX_SPEND_PENALTY)
+    spend_n     = norm(spend_penalty,     MAX_SPEND_PENALTY)
     carryover_n = norm(carryover_penalty, MAX_CARRYOVER_PENALTY)
-    total = W_SPEND * spend_n + W_CARRYOVER * carryover_n
+    total       = W_SPEND * spend_n + W_CARRYOVER * carryover_n
     return spend_n, carryover_n, total
 
 
 # ---------------------------------------------------------------------------
-# Conversion signal — shared across all tasks
+# Conversion signal — uses dynamic MAX_CONV_PER_STEP from bounds
 # ---------------------------------------------------------------------------
 
-def compute_conv_signal(delayed_reward: float) -> float:
-    """Normalize per-step conversion value to [0, 1]."""
-    return norm(delayed_reward, MAX_CONV_PER_STEP)
+def compute_conv_signal(
+    delayed_reward: float,
+    bounds:         dict | None = None,
+) -> float:
+    """
+    Normalize per-step conversion value to [0, 1].
+    Uses dynamic ceiling from bounds when provided.
+    """
+    ceiling = bounds.get("MAX_CONV_PER_STEP", MAX_CONV_PER_STEP) if bounds else MAX_CONV_PER_STEP
+    return norm(delayed_reward, ceiling)
 
 
 # ---------------------------------------------------------------------------
@@ -174,9 +257,7 @@ def compute_terminal_bonus(averaged_signals: dict[str, tuple[float, float]]) -> 
 
 
 # ---------------------------------------------------------------------------
-# Assemble final step reward from components
-# Shared assembly logic — task modules call this after computing their
-# own positive signals.
+# Assemble final step reward
 # ---------------------------------------------------------------------------
 
 def assemble_step_reward(
@@ -189,10 +270,11 @@ def assemble_step_reward(
     """
     Apply gate, subtract soft penalties, normalize to [0,1], add terminal bonus.
 
-    raw_min = -(W_CARRYOVER + W_SPEND) = -0.10  (always, since soft penalties shared)
-    raw_max = passed in by task module (sum of positive weights)
+    raw_min = -(W_CARRYOVER + W_SPEND) = -0.10  (always — weights are fixed)
+    raw_max = sum of positive weights (passed in by task module)
 
     Returns (step_reward, raw_combined).
+    Final reward guaranteed in [0, 1].
     """
     raw_min = -(W_CARRYOVER + W_SPEND)   # -0.10
 

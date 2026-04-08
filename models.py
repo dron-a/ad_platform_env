@@ -267,6 +267,9 @@ class AdPlatformState(State):
     # -----------------last step reward ----------------------------
     last_step_reward: float = Field(default=0.0)
 
+    # -------------------- reward Bonus for dynamic rubric calculation -------------------------
+    reward_bounds: dict = Field(default_factory=dict)
+
 
 
 

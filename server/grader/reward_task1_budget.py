@@ -19,6 +19,7 @@ import numpy as np
 from .reward_base import (
     compute_conv_signal,
     compute_illegal_gate,
+    compute_reward_bounds,
     compute_soft_penalties,
     compute_terminal_bonus,
     shift_scale,
@@ -101,6 +102,7 @@ def compute_task1_step_reward(
     cumulative_smooth: float = 0.0,
     cumulative_conv:   float = 0.0,
     max_possible_conv: float = 1.0,
+    bounds: dict | None = None,
 ) -> dict:
     """
     Compute normalized step reward for task 1.
@@ -125,7 +127,7 @@ def compute_task1_step_reward(
     dict with step_reward and all component diagnostics
     """
     # --- Positive signals ---
-    conv_n        = compute_conv_signal(delayed_reward)
+    conv_n        = compute_conv_signal(delayed_reward, bounds=bounds)
     utilization_n = compute_utilization(total_spend, total_budget)
     smoothness_n  = compute_smoothness(spend, total_spend, step_count)
 
@@ -136,7 +138,7 @@ def compute_task1_step_reward(
     )
 
     # --- Illegal gate ---
-    illegal_gate = compute_illegal_gate(illegal_penalty)
+    illegal_gate = compute_illegal_gate(illegal_penalty, bounds=bounds)
 
     # --- Soft penalties: carryover + spend ---
     spend_n, carryover_n, soft_penalty = compute_soft_penalties(

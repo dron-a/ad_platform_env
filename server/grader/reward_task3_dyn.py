@@ -22,6 +22,7 @@ from .reward_base import (
     compute_conv_signal,
     compute_bid_quality,
     compute_illegal_gate,
+    compute_reward_bounds,
     compute_soft_penalties,
     compute_terminal_bonus,
     assemble_step_reward,
@@ -193,6 +194,7 @@ def compute_task3_step_reward(
     cumulative_conv:          float = 0.0,
     cumulative_adaptability:  float = 0.0,
     max_possible_conv:        float = 1.0,
+    bounds: dict | None = None,
 ) -> dict:
     """
     Compute normalized step reward for task 3.
@@ -200,7 +202,7 @@ def compute_task3_step_reward(
     Returns dict with step_reward and all component diagnostics.
     """
     # --- Positive signals ---
-    conv_n         = compute_conv_signal(delayed_reward)
+    conv_n         = compute_conv_signal(delayed_reward, bounds=bounds)
     bid_n          = compute_bid_quality(
         bids, competitor_bids, conversion_rates, allocations
     )
@@ -221,7 +223,7 @@ def compute_task3_step_reward(
     )
 
     # --- Gate and soft penalties ---
-    illegal_gate                     = compute_illegal_gate(illegal_penalty)
+    illegal_gate                     = compute_illegal_gate(illegal_penalty, bounds=bounds)
     spend_n, carryover_n, soft_penalty = compute_soft_penalties(
         spend_penalty, carryover_penalty
     )
