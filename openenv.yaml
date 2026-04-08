@@ -8,17 +8,26 @@ server:
   entry: "server.app:app"
 
 tasks:
-  - name: budget
+  - id: budget
     description: "Allocate a fixed budget across ad campaigns over 30 steps to maximize conversions. No bidding required."
     difficulty: easy
+    grader:
+      type: python_function
+      name: reaward_task1_budget
 
-  - name: auction
+  - id: auction
     description: "Bid competitively against adaptive competitors while managing a budget across 3 campaigns."
     difficulty: medium
+    grader:
+      type: python_function
+      name: reaward_task2_auction
 
-  - name: dynamic_campaign
+  - id: dynamic_campaign
     description: "Manage budget and bids across campaigns with seasonality, market events, and adaptive competitors."
     difficulty: hard
+    grader:
+      type: python_function
+      name: reaward_task2_dyn
 
 action:
   type: object
