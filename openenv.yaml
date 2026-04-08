@@ -1,64 +1,23 @@
+spec_version: 1
 name: ad_platform_env
 version: "0.1.0"
-description: "Multi-task ad platform RL environment for budget optimization, auction bidding, and dynamic-campaign management"
-
-server:
-  host: "0.0.0.0"
-  port: 8000
-  entry: "server.app:app"
-
+description: "Multi-task ad platform RL environment"
+type: space
+runtime: fastapi
+app: inference:app
+port: 8000
 tasks:
   - id: budget
-    description: "Allocate a fixed budget across ad campaigns over 30 steps to maximize conversions. No bidding required."
+    description: "Allocate a fixed budget across ad campaigns"
     difficulty: easy
-    grader:
-      type: python_function
-      name: reaward_task1_budget
+    grader: grade/budget
 
   - id: auction
-    description: "Bid competitively against adaptive competitors while managing a budget across 3 campaigns."
+    description: "Bid competitively against adaptive competitors"
     difficulty: medium
-    grader:
-      type: python_function
-      name: reaward_task2_auction
+    grader: grade/auction
 
   - id: dynamic_campaign
-    description: "Manage budget and bids across campaigns with seasonality, market events, and adaptive competitors."
+    description: "Manage budget and bids across campaigns"
     difficulty: hard
-    grader:
-      type: python_function
-      name: reaward_task2_dyn
-
-action:
-  type: object
-  fields:
-    allocations:
-      type: array
-      items: float
-      description: "Budget allocation per campaign"
-    bids:
-      type: array
-      items: float
-      description: "Bid per campaign (required for auction/dynamic_campaign)"
-
-observation:
-  type: object
-  fields:
-    step:
-      type: integer
-      description: "Current timestep"
-    remaining_budget:
-      type: float
-      description: "Remaining budget for the episode"
-    campaign_performance:
-      type: array
-      items: float
-      description: "Conversion rate per campaign"
-    competitor_bids:
-      type: array
-      items: float
-      description: "Current competitor bids per campaign"
-    reward:
-      type: float
-    done:
-      type: boolean
+    grader: grade/dynamic_campaign
