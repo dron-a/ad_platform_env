@@ -12,15 +12,19 @@
 # Campaign 0: branded search     — high intent, best CVR
 # Campaign 1: generic search     — medium intent, moderate CVR
 # Campaign 2: display/retarget   — low intent, lowest CVR
-conversion_rates: [0.05, 0.03, 0.02]
+#conversion_rates: [0.05, 0.03, 0.02]
+conversion_rates : [0.08, 0.025, 0.008]
 
 # Baseline competitor bids per campaign ($)
 # Branded keywords have lower competition, generic higher
-competitor_bids: [0.45, 0.55, 0.30]
+#competitor_bids: [0.45, 0.55, 0.30]
+competitor_bids: [0.50, 2.50, 0.40]
+
 
 # Per-campaign bid volatility (std-dev fraction)
 # Generic search has higher volatility due to more competitors
-bid_volatility: [0.05, 0.10, 0.06]
+#bid_volatility: [0.05, 0.10, 0.06]
+bid_volatility: [ 0.06, 0.20, 0.15]
 
 # Seasonal multipliers — 7-day weekly pattern (wraps across 30 steps)
 # Mon-Fri higher intent, weekend lower for B2B-style campaigns
