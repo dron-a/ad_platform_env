@@ -9,3 +9,5 @@ env
 # Virtual environments
 .venv
 .python-version
+# cache
+.market_cache

@@ -33,9 +33,12 @@ Environment variables:
 import asyncio
 import json
 import os
+import sys
 import re
 import types
 from typing import Dict
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from client import AdPlatformClient
 from models import AdPlatformAction
@@ -109,7 +112,7 @@ def test_market_provider() -> bool:
         return True
 
     try:
-        from .data_build import MarketDataProvider
+        from data_build import MarketDataProvider
     except ImportError:
         from data_build import MarketDataProvider
         # return False
