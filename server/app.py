@@ -2,6 +2,8 @@
 import os
 import argparse
 import uvicorn
+from fastapi.responses import HTMLResponse
+from pathlib import Path
 from server.grader import compute_score, compute_auction_score, compute_dynamics_campaign_score
 
 try:
@@ -153,6 +155,36 @@ def grade_dynamic_campaign():
     grader_result = compute_dynamics_campaign_score(env._state)
     score = float(max(0.01, min(0.99, grader_result["final_score"])))
     return {"score": score, "reward": score}
+
+################################################ Readme.MD display for main web page ####################################################################
+
+@app.get("/", response_class=HTMLResponse)
+def root():
+    readme_path = Path(__file__).parent.parent / "README.md"
+    content = readme_path.read_text() if readme_path.exists() else "# Ad Platform RL Environment"
+    # Escape backticks for JS template literal
+    content_escaped = content.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$")
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ad Platform RL Environment</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown-light.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <style>
+        .markdown-body {{ max-width: 900px; margin: 40px auto; padding: 0 20px; }}
+    </style>
+</head>
+<body class="markdown-body">
+    <div id="content"></div>
+    <script>
+        document.getElementById('content').innerHTML = marked.parse(`{content_escaped}`);
+    </script>
+</body>
+</html>"""
+
+##############################################################################################################################################################
 
 def main(host: str = "0.0.0.0", port: int = 8000):
     """
