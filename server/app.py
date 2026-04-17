@@ -4,6 +4,7 @@ import argparse
 import uvicorn
 from fastapi.responses import HTMLResponse
 from pathlib import Path
+import re
 from server.grader import compute_score, compute_auction_score, compute_dynamics_campaign_score
 
 try:
@@ -161,7 +162,9 @@ def grade_dynamic_campaign():
 @app.get("/", response_class=HTMLResponse)
 def root():
     readme_path = Path(__file__).parent.parent / "README.md"
-    content = readme_path.read_text() if readme_path.exists() else "# Ad Platform RL Environment"
+    raw = readme_path.read_text() if readme_path.exists() else "# Ad Platform RL Environment"
+    # Strip YAML frontmatter (--- ... ---) before rendering
+    content = re.sub(r'^---[\s\S]*?---\n', '', raw, count=1).strip()
     # Escape backticks for JS template literal
     content_escaped = content.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$")
     return f"""<!DOCTYPE html>
