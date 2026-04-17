@@ -1,3 +1,24 @@
+"""
+inference.py
+============
+Inference script for AdPlatform RL environment.
+Runs all three tasks sequentially with continuous stdout output.
+
+MANDATORY ENVIRONMENT VARIABLES:
+    API_BASE_URL      : LLM API endpoint
+    MODEL_NAME        : model identifier
+    HF_TOKEN          : Hugging Face / API key
+    IMAGE_NAME        : docker image name (if using from_docker_image)
+    YAML_PATH         : path to Ads export YAML (optional)
+
+STDOUT FORMAT (per task, continuous):
+    [START] task=<task> env=<benchmark> model=<model>
+    [STEP]  step=<n> action=<action> reward=<0.00> done=<true|false> error=<msg|null>
+    [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...>
+
+Score: mean normalized reward per step -> sum(rewards) / MAX_STEPS
+"""
+
 import asyncio
 import json
 import os
@@ -11,26 +32,22 @@ from models import AdPlatformAction
 from client import AdPlatformClient
 
 # ---------------- CONFIG ----------------
-IMAGE_NAME        = os.getenv("IMAGE_NAME")
-API_KEY           = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-API_BASE_URL      = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME        = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
-YAML_PATH         = os.getenv("YAML_PATH",    None)
-BENCHMARK         = os.getenv("BENCHMARK",    "ad_platform_env")
-
-# Market data config — all default to no market data if not set
-VERTICAL                = os.getenv("MARKET_VERTICAL", "ecommerce")
-SAMPLING                = os.getenv("MARKET_SAMPLING",  "sequential")
-REFRESH_PER_EPISODE     = os.getenv("MARKET_REFRESH_PER_EPISODE", "true").lower() == "true"
-FRED_DATA_API_KEY       = os.getenv("FRED_DATA_API_KEY", "")
-
+IMAGE_NAME   = os.getenv("IMAGE_NAME")
+API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
+YAML_PATH    = os.getenv("YAML_PATH",    None)
+BENCHMARK    = os.getenv("BENCHMARK",    "ad_platform_env")
+VERTICAL     = os.getenv("MARKET_VERTICAL", "ecommerce")
+SAMPLING     = os.getenv("MARKET_SAMPLING", "sequential")
+REFRESH_PER_EPISODE = os.getenv("MARKET_REFRESH_PER_EPISODE", "true").lower() == "true"
 # All three tasks run sequentially
 ALL_TASKS = ["budget", "auction", "dynamic_campaign"]
 
-MAX_STEPS                = 30
-TEMPERATURE              = 0.7
-MAX_TOKENS               = 256
-SUCCESS_SCORE_THRESHOLD  = 0.5
+MAX_STEPS               = 30
+TEMPERATURE             = 0.7
+MAX_TOKENS              = 256
+SUCCESS_SCORE_THRESHOLD = 0.5
 
 
 # ---------------- SYSTEM PROMPTS ----------------
@@ -262,7 +279,7 @@ async def run_episode(
         obs_obj = getattr(result, "observation", result)
         obs = obs_obj.model_dump() if hasattr(obs_obj, "model_dump") else {}
 
-        consecutive_failures     = 0
+        consecutive_failures    = 0
         MAX_CONSECUTIVE_FAILURES = 10
 
         for step in range(1, MAX_STEPS + 1):
@@ -307,10 +324,10 @@ async def run_episode(
                 if asyncio.iscoroutine(result):
                     result = await result
 
-            reward    = getattr(result, "reward", 0.0) or 0.0
-            done      = getattr(result, "done",   False)
-            obs_obj   = getattr(result, "observation", result)
-            obs       = obs_obj.model_dump() if hasattr(obs_obj, "model_dump") else {}
+            reward  = getattr(result, "reward", 0.0) or 0.0
+            done    = getattr(result, "done",   False)
+            obs_obj = getattr(result, "observation", result)
+            obs     = obs_obj.model_dump() if hasattr(obs_obj, "model_dump") else {}
             breakdown = obs.get("reward_breakdown")
 
             steps_taken = step
@@ -344,34 +361,20 @@ async def run_episode(
 async def main() -> None:
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    # --- Local path: create market provider once, shared across all tasks ---
-    # Provider is created before the task loop — one network fetch for all tasks
-    # Docker path: provider runs inside the container via app.py, not here
-    market_provider = None
-    if not IMAGE_NAME and VERTICAL:
-        from market_data_provider import MarketDataProvider
-        market_provider = MarketDataProvider(
-            vertical=VERTICAL,
-            refresh_per_episode=REFRESH_PER_EPISODE,
-            sampling=SAMPLING,
-        )
-
     for task in ALL_TASKS:
+        market_provider = None
+        if VERTICAL:
+            from market_data_provider import MarketDataProvider
+            market_provider = MarketDataProvider(
+                vertical=VERTICAL,
+                refresh_per_episode=True,
+                sampling="sequential",
+            )
+
         if IMAGE_NAME:
-            # All market config forwarded as env vars to the container
-            # Container's app.py reads these and creates its own provider
-            # FRED_DATA_API_KEY forwarded so container can use it without
-            # it ever appearing in code
             env = await AdPlatformClient.from_docker_image(
                 IMAGE_NAME,
-                env_vars={
-                    "TASK":                       task,
-                    "MARKET_VERTICAL":            VERTICAL or "",
-                    "MARKET_SAMPLING":            SAMPLING,
-                    "MARKET_REFRESH_PER_EPISODE": str(REFRESH_PER_EPISODE).lower(),
-                    "FRED_DATA_API_KEY":           FRED_DATA_API_KEY,
-                    "YAML_PATH":                  YAML_PATH or "",
-                },
+                env_vars={"TASK": task, "MARKET_VERTICAL": VERTICAL or ""}
             )
             try:
                 await run_episode(client, env, task)
@@ -380,10 +383,7 @@ async def main() -> None:
                     await env.close()
                 except Exception:
                     pass   # silent cleanup
-
         else:
-            # Local path — reuse same market provider across tasks
-            # Each task gets fresh env but shares market data fetch
             env = AdPlatformEnvironment(
                 task=task,
                 yaml_path=YAML_PATH,
@@ -393,6 +393,7 @@ async def main() -> None:
                 await run_episode(client, env, task)
             except Exception as e:
                 print(f"[DEBUG] Episode error for task={task}: {e}", flush=True)
+            
 
 
 if __name__ == "__main__":

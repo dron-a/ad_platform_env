@@ -51,6 +51,7 @@ jsonschema==4.26.0
 jsonschema-path==0.4.5
 jsonschema-specifications==2025.9.1
 keyring==25.7.0
+lxml==6.0.4
 markdown-it-py==4.0.0
 markupsafe==3.0.3
 mcp==1.26.0
@@ -79,6 +80,7 @@ pyperclip==1.11.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-multipart==0.0.22
+pytrends==4.9.2
 pytz==2026.1.post1
 pyyaml==6.0.3
 referencing==0.37.0

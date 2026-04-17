@@ -1,0 +1,27 @@
+ecommerce:
+  conversion_rates:    [0.037, 0.021, 0.009]
+  competitor_bids:     [0.89,  1.45,  0.32]
+  bid_volatility:      [0.05,  0.10,  0.06]
+  seasonal_multipliers: [1.10, 1.15, 1.15, 1.10, 1.05, 0.85, 0.80]
+  total_budget:        1000.0
+
+saas:
+  conversion_rates:    [0.051, 0.031, 0.012]
+  competitor_bids:     [3.20,  5.80,  1.10]
+  bid_volatility:      [0.04,  0.08,  0.05]
+  seasonal_multipliers: [1.15, 1.20, 1.20, 1.15, 1.10, 0.80, 0.75]
+  total_budget:        2000.0
+
+travel:
+  conversion_rates:    [0.028, 0.018, 0.007]
+  competitor_bids:     [1.20,  2.40,  0.45]
+  bid_volatility:      [0.08,  0.15,  0.07]
+  seasonal_multipliers: [0.90, 0.95, 1.00, 1.05, 1.10, 1.20, 1.15]
+  total_budget:        1500.0
+
+finance:
+  conversion_rates:    [0.043, 0.025, 0.008]
+  competitor_bids:     [4.50,  8.20,  1.80]
+  bid_volatility:      [0.03,  0.06,  0.04]
+  seasonal_multipliers: [1.05, 1.10, 1.10, 1.05, 1.00, 0.90, 0.85]
+  total_budget:        3000.0
